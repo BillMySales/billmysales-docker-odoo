@@ -112,6 +112,22 @@ docker compose down -v                   # stop and DELETE all data
 
 Modules can also be installed from Odoo's Apps menu as usual.
 
+Point of sale
+-------------
+
+The Point of Sale app (`point_of_sale`) is not installed by default: a shop
+needs its own setup (payment methods, cash control, products for sale).
+
+1. Install it: add it to `ODOO_MODULES` (e.g.
+   `ODOO_MODULES=sale_management,account,point_of_sale`) and run
+   `docker compose up -d` (`setup` installs the missing modules), or install
+   it from the Apps menu.
+2. Open the Point of Sale app and choose a shop type (e.g. retail) without
+   demo data: Odoo creates the point of sale in the company's currency (CLP)
+   with the payment methods Cash, Card and Customer account.
+3. Mark the products to sell as "Available in POS" (product form), then
+   open a session from the point of sale's card.
+
 Backups
 -------
 
