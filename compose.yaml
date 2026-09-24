@@ -1,0 +1,236 @@
+# Odoo stack: Caddy (TLS) + Odoo (official image) + PostgreSQL, with a setup
+# job and optional backups and Mailpit.
+#
+# Quick start (development):
+#   cp .env.dev.example .env
+#   docker compose up -d
+#   docker compose logs -f setup   # wait for "==> Done"
+#
+# Production: start from .env.prod.example instead. See README.md.
+#
+# Required variables have no default: compose refuses to start without them.
+
+name: ${COMPOSE_PROJECT_NAME:-odoo}
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: ${LOG_MAX_SIZE:-10m}
+    max-file: "${LOG_MAX_FILE:-3}"
+
+# Environment shared by the Odoo containers: scripts/odoo-conf.sh turns it
+# into the Odoo configuration file ($ODOO_RC) when each container starts.
+x-odoo-env: &odoo-env
+  ODOO_RC: /tmp/odoo.conf
+  ODOO_VERSION: ${ODOO_VERSION:-19.0-20260908}
+  ODOO_URL: ${ODOO_URL:?Set ODOO_URL in .env (e.g. https://erp.example.com)}
+  ODOO_DB: ${ODOO_DB:-odoo}
+  ODOO_MASTER_PASSWORD: ${ODOO_MASTER_PASSWORD:?Set ODOO_MASTER_PASSWORD in .env}
+  DB_HOST: db
+  DB_PORT: 5432
+  DB_USER: ${DB_USER:-odoo}
+  DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
+  ODOO_WORKERS: ${ODOO_WORKERS:-2}
+  ODOO_CRON_THREADS: ${ODOO_CRON_THREADS:-1}
+  ODOO_LIMIT_MEMORY_SOFT: ${ODOO_LIMIT_MEMORY_SOFT:-2147483648}
+  ODOO_LIMIT_MEMORY_HARD: ${ODOO_LIMIT_MEMORY_HARD:-2684354560}
+  ODOO_LIMIT_TIME_CPU: ${ODOO_LIMIT_TIME_CPU:-600}
+  ODOO_LIMIT_TIME_REAL: ${ODOO_LIMIT_TIME_REAL:-1200}
+  ODOO_LOG_LEVEL: ${ODOO_LOG_LEVEL:-info}
+  ODOO_DEV: ${ODOO_DEV:-}
+  SMTP_HOST: ${SMTP_HOST:-}
+  SMTP_PORT: ${SMTP_PORT:-587}
+  SMTP_SECURE: ${SMTP_SECURE:-}
+  SMTP_USER: ${SMTP_USER:-}
+  SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+  SMTP_FROM: ${SMTP_FROM:-}
+
+# Files mounted in every Odoo container.
+x-odoo-volumes: &odoo-volumes
+  - odoo_data:/var/lib/odoo
+  - addons:/mnt/extra-addons
+  - ./scripts:/usr/local/share/stack/scripts:ro
+
+services:
+  db:
+    image: postgres:${POSTGRES_VERSION:-18}-alpine
+    restart: unless-stopped
+    logging: *logging
+    environment:
+      POSTGRES_DB: postgres
+      POSTGRES_USER: ${DB_USER:-odoo}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
+    volumes:
+      # PostgreSQL 18+ images keep their data under /var/lib/postgresql/<major>.
+      - db_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: ${DB_MEMORY_LIMIT:-1g}
+
+  # One-shot job: creates or updates the database, installs modules and
+  # applies the environment. Safe to repeat; runs on every `up`.
+  setup:
+    image: odoo:${ODOO_VERSION:-19.0-20260908}
+    logging: *logging
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      <<: *odoo-env
+      ODOO_LANG: ${ODOO_LANG:-es_CL}
+      ODOO_COUNTRY: ${ODOO_COUNTRY:-CL}
+      ODOO_CURRENCY: ${ODOO_CURRENCY:-CLP}
+      ODOO_TIMEZONE: ${ODOO_TIMEZONE:-America/Santiago}
+      ODOO_COMPANY_NAME: ${ODOO_COMPANY_NAME:-Odoo}
+      ODOO_MODULES: ${ODOO_MODULES-sale_management,account}
+      ODOO_ADMIN_USER: ${ODOO_ADMIN_USER:-admin}
+      ODOO_ADMIN_PASSWORD: ${ODOO_ADMIN_PASSWORD:?Set ODOO_ADMIN_PASSWORD in .env}
+      ODOO_ADMIN_EMAIL: ${ODOO_ADMIN_EMAIL:?Set ODOO_ADMIN_EMAIL in .env}
+    volumes: *odoo-volumes
+    entrypoint: ["sh", "/usr/local/share/stack/scripts/setup.sh"]
+    restart: "no"
+    deploy:
+      resources:
+        limits:
+          memory: ${SETUP_MEMORY_LIMIT:-1536m}
+
+  # Odoo server (web, live updates and scheduled actions), internal only.
+  odoo:
+    image: odoo:${ODOO_VERSION:-19.0-20260908}
+    restart: unless-stopped
+    logging: *logging
+    depends_on:
+      setup:
+        condition: service_completed_successfully
+    environment:
+      <<: *odoo-env
+    # Lets Odoo reach services on the host (e.g. an app running locally)
+    # at http://host.docker.internal:<port>, also on Linux.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes: *odoo-volumes
+    entrypoint: ["sh", "/usr/local/share/stack/scripts/entrypoint.sh"]
+    command: ["odoo"]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://localhost:8069/web/health"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          memory: ${ODOO_MEMORY_LIMIT:-2g}
+
+  caddy:
+    image: caddy:${CADDY_VERSION:-2.11}-alpine
+    restart: unless-stopped
+    logging: *logging
+    depends_on:
+      odoo:
+        condition: service_healthy
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:-:80}
+      UPLOAD_MAX_SIZE: ${UPLOAD_MAX_SIZE:-128M}
+    ports:
+      - "${HTTP_BIND:-127.0.0.1}:${HTTP_PORT:-80}:80"
+      - "${HTTP_BIND:-127.0.0.1}:${HTTPS_PORT:-443}:443"
+      - "${HTTP_BIND:-127.0.0.1}:${HTTPS_PORT:-443}:443/udp"
+    volumes:
+      - ./config/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      # TLS certificates and keys (keep them: ACME rate limits).
+      - caddy_data:/data
+      - caddy_config:/config
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://localhost:8080/web/health"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 5s
+    deploy:
+      resources:
+        limits:
+          memory: ${CADDY_MEMORY_LIMIT:-256m}
+
+  # Optional (profile "backup"): database dump + filestore every
+  # BACKUP_INTERVAL_HOURS, kept BACKUP_KEEP_DAYS days in the `backups` volume
+  # (overrides/local-dirs.yaml puts them in a local directory instead).
+  backup:
+    image: postgres:${POSTGRES_VERSION:-18}-alpine
+    profiles: ["backup"]
+    restart: unless-stopped
+    logging: *logging
+    depends_on:
+      setup:
+        condition: service_completed_successfully
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_USER: ${DB_USER:-odoo}
+      DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
+      ODOO_DB: ${ODOO_DB:-odoo}
+      BACKUP_INTERVAL_HOURS: ${BACKUP_INTERVAL_HOURS:-24}
+      BACKUP_KEEP_DAYS: ${BACKUP_KEEP_DAYS:-7}
+    volumes:
+      # Read-write so `backup.sh restore` can put the filestore back.
+      - odoo_data:/var/lib/odoo
+      - backups:/backups
+      - ./scripts/backup.sh:/usr/local/bin/backup.sh:ro
+    entrypoint: ["bash", "/usr/local/bin/backup.sh"]
+    healthcheck:
+      test: ["CMD", "bash", "/usr/local/bin/backup.sh", "health"]
+      interval: 5m
+      timeout: 10s
+      retries: 3
+      start_period: 5m
+    deploy:
+      resources:
+        limits:
+          memory: ${BACKUP_MEMORY_LIMIT:-512m}
+
+  # Optional (profile "mailpit", development): catches all outgoing mail.
+  # Set SMTP_HOST=mailpit and SMTP_PORT=1025; web UI on MAILPIT_PORT.
+  mailpit:
+    image: axllent/mailpit:${MAILPIT_VERSION:-v1.31}
+    profiles: ["mailpit"]
+    restart: unless-stopped
+    logging: *logging
+    environment:
+      MP_SMTP_AUTH_ACCEPT_ANY: 1
+      MP_SMTP_AUTH_ALLOW_INSECURE: 1
+    ports:
+      - "${HTTP_BIND:-127.0.0.1}:${MAILPIT_PORT:-8025}:8025"
+
+  # Odoo's shell and CLI (profile "tools"), e.g.:
+  #   docker compose run --rm console shell
+  #   docker compose run --rm console module install stock
+  console:
+    image: odoo:${ODOO_VERSION:-19.0-20260908}
+    profiles: ["tools"]
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      <<: *odoo-env
+    volumes: *odoo-volumes
+    entrypoint: ["sh", "-c", ". /usr/local/share/stack/scripts/odoo-conf.sh && exec odoo \"$$@\" -c \"$${ODOO_RC}\" -d \"$${ODOO_DB}\"", "--"]
+    command: ["shell", "--no-http"]
+    deploy:
+      resources:
+        limits:
+          memory: ${SETUP_MEMORY_LIMIT:-1536m}
+
+volumes:
+  db_data:
+  odoo_data:
+  addons:
+  caddy_data:
+  caddy_config:
+  backups:

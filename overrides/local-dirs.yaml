@@ -1,0 +1,37 @@
+# Keep the stack's data in local directories instead of named volumes, so it
+# is visible from the host (and easy to include in host-level backups).
+#
+# In .env:
+#   COMPOSE_FILE=compose.yaml:overrides/local-dirs.yaml
+#   DATA_DIR=./data        # optional, default ./data (relative to compose.yaml)
+#
+# Only the directories you keep here change; delete the lines you don't need
+# (e.g. keep just `odoo` and `backups`). Existing data in the named volumes is
+# NOT moved: switch before the first `up`, or restore a backup afterwards.
+# On Linux, the Odoo containers run as UID 100 (odoo): create their
+# directories first: mkdir -p data/odoo data/addons && sudo chown -R 100:101 data/odoo data/addons
+# On macOS any directory works (Docker Desktop maps owners).
+# Backup files are root-owned with mode 0600.
+
+x-odoo-dirs: &odoo-dirs
+  - ${DATA_DIR:-./data}/odoo:/var/lib/odoo
+  - ${DATA_DIR:-./data}/addons:/mnt/extra-addons
+
+services:
+  db:
+    volumes:
+      - ${DATA_DIR:-./data}/db:/var/lib/postgresql
+  setup:
+    volumes: *odoo-dirs
+  odoo:
+    volumes: *odoo-dirs
+  console:
+    volumes: *odoo-dirs
+  caddy:
+    volumes:
+      - ${DATA_DIR:-./data}/caddy/data:/data
+      - ${DATA_DIR:-./data}/caddy/config:/config
+  backup:
+    volumes:
+      - ${DATA_DIR:-./data}/odoo:/var/lib/odoo
+      - ${DATA_DIR:-./data}/backups:/backups

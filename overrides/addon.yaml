@@ -1,0 +1,27 @@
+# Develop an addon live: mount it from a local directory into
+# /mnt/extra-addons and run Odoo with auto-reload (Python) and XML/views read
+# from disk. The addon is installed by `setup` (it is added to ODOO_MODULES).
+#
+# In .env:
+#   COMPOSE_FILE=compose.yaml:overrides/addon.yaml
+#   ADDON_PATH=../my_addon   # addon source (directory with __manifest__.py)
+#   ADDON_NAME=my_addon      # technical name (directory name)
+#   ODOO_MODULES=sale_management,account,my_addon   # to install it
+#
+# Changes to Python code restart the server; XML and QWeb are read on each
+# request. Developer mode is slower: never use this override in production.
+
+x-addon: &addon ${ADDON_PATH:?Set ADDON_PATH in .env}:/mnt/extra-addons/${ADDON_NAME:?Set ADDON_NAME in .env}
+
+services:
+  setup:
+    volumes:
+      - *addon
+  odoo:
+    environment:
+      ODOO_DEV: reload,xml,qweb
+    volumes:
+      - *addon
+  console:
+    volumes:
+      - *addon
