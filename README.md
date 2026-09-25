@@ -148,8 +148,10 @@ docker compose restart odoo
 data `setup` fails and the restore would never run); the database must
 be running (`docker compose up -d db` if the stack is down).
 
-A restore replaces the database with a fresh copy (closing Odoo's open
-connections), so nothing created after the backup remains.
+A restore replaces the database with a fresh copy (`dropdb --force`,
+`createdb`, `pg_restore`, closing Odoo's open connections), so nothing created
+after the backup remains; `pg_restore --clean` would keep tables created
+after the backup and block on Odoo's connections.
 
 Overrides
 ---------
@@ -205,9 +207,14 @@ Notes:
   `docker compose up -d`.
 - Extra addons go in the `addons` volume (`/mnt/extra-addons`, one directory
   per addon), or are mounted with `overrides/addon.yaml`; restart `odoo`
-  after adding one and install it from Apps or `ODOO_MODULES`.
+  after adding one and install it from Apps or `ODOO_MODULES`. Odoo rejects
+  `license: MIT` in an addon's manifest (use e.g. `LGPL-3` or `OPL-1`).
 - `ODOO_LIMIT_MEMORY_*` limit each worker's virtual memory (Odoo's defaults,
   2 and 2.5 GiB); the real memory cap is the container's `ODOO_MEMORY_LIMIT`.
+  Lower values from old guides (640/768 MiB) make workers respawn in a loop
+  with `ODOO_DEV=reload`.
+- `http_interface = 0.0.0.0` is set explicitly: Odoo 20 changes the default
+  to `127.0.0.1`, which Caddy couldn't reach.
 - In development mode (`overrides/addon.yaml`), Python 3.12 logs a
   `DeprecationWarning` about `fork()` when Odoo reloads: harmless.
 - From inside the containers, the host machine is reachable as
