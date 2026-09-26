@@ -42,8 +42,8 @@ Production
 
 ```shell
 cp .env.prod.example .env
-# Fill in ODOO_URL, SITE_ADDRESS, ODOO_MASTER_PASSWORD, DB_PASSWORD,
-# ODOO_ADMIN_PASSWORD, ODOO_ADMIN_EMAIL and the SMTP_* values.
+# Required: ODOO_URL, SITE_ADDRESS, ODOO_MASTER_PASSWORD, DB_PASSWORD,
+# ODOO_ADMIN_PASSWORD, ODOO_ADMIN_EMAIL. Recommended: the SMTP_* values.
 docker compose up -d
 ```
 
@@ -53,8 +53,8 @@ docker compose up -d
   `proxy_mode`, so the proxy's `X-Forwarded-*` headers give it the scheme,
   host and client IP.
 - Compose refuses to start while a required value is missing.
-- Configure SMTP: without it Odoo can't send any mail (quotations, invoices,
-  password resets).
+- Configure SMTP (recommended, not required): without `SMTP_HOST` Odoo
+  can't send any mail (quotations, invoices, password resets).
 - The `backup` profile is enabled by default in the production template.
 - Behind an existing Traefik (no host ports), use `overrides/traefik.yaml`
   (see [Overrides](#overrides)).
@@ -198,9 +198,9 @@ Every variable is documented in `.env.prod.example`. Main groups:
 Notes:
 
 - The SMTP settings configure Odoo's default mail server, which supports
-  STARTTLS (`SMTP_SECURE=tls`, port 587) but not SMTPS (port 465); for that,
-  add a server in Settings > Technical > Outgoing Mail Servers (such servers
-  take precedence over the default one).
+  STARTTLS (`SMTP_SECURE=tls`, the default, port 587) but not SMTPS (port
+  465); for that, add a server in Settings > Technical > Outgoing Mail
+  Servers (such servers take precedence over the default one).
 - Odoo 19 is served in the `es_CL` language by default; users choose their own
   language in their preferences. More languages: Settings > Languages.
 - The site URL comes from `ODOO_URL`: changing the domain or port only needs

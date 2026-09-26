@@ -1,6 +1,8 @@
 # Develop an addon live: mount it from a local directory into
 # /mnt/extra-addons and run Odoo with auto-reload (Python) and XML/views read
-# from disk. The addon is installed by `setup` (it is added to ODOO_MODULES).
+# from disk (ODOO_DEV=reload,xml,qweb on the `odoo` service). The override
+# only mounts the addon: to have `setup` install it, add it to ODOO_MODULES
+# yourself (or install it from the Apps menu).
 #
 # In .env:
 #   COMPOSE_FILE=compose.yaml:overrides/addon.yaml
