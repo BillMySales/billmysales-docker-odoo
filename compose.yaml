@@ -51,6 +51,13 @@ x-odoo-volumes: &odoo-volumes
   - addons:/mnt/extra-addons
   - ./scripts:/usr/local/share/stack/scripts:ro
 
+# Lets Odoo reach services on the host (e.g. an app running locally)
+# at http://host.docker.internal:<port>, also on Linux.
+# Every container that runs the platform's code: its web process, setup,
+# cron, workers, the console (Docker Desktop resolves it anyway).
+x-host-access: &host-access
+  - "host.docker.internal:host-gateway"
+
 services:
   db:
     image: postgres:${POSTGRES_VERSION:-18}-alpine
@@ -93,6 +100,7 @@ services:
       ODOO_ADMIN_USER: ${ODOO_ADMIN_USER:-admin}
       ODOO_ADMIN_PASSWORD: ${ODOO_ADMIN_PASSWORD:?Set ODOO_ADMIN_PASSWORD in .env}
       ODOO_ADMIN_EMAIL: ${ODOO_ADMIN_EMAIL:?Set ODOO_ADMIN_EMAIL in .env}
+    extra_hosts: *host-access
     volumes: *odoo-volumes
     entrypoint: ["sh", "/usr/local/share/stack/scripts/setup.sh"]
     restart: "no"
@@ -111,10 +119,7 @@ services:
         condition: service_completed_successfully
     environment:
       <<: *odoo-env
-    # Lets Odoo reach services on the host (e.g. an app running locally)
-    # at http://host.docker.internal:<port>, also on Linux.
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+    extra_hosts: *host-access
     volumes: *odoo-volumes
     entrypoint: ["sh", "/usr/local/share/stack/scripts/entrypoint.sh"]
     command: ["odoo"]
@@ -219,6 +224,7 @@ services:
         condition: service_healthy
     environment:
       <<: *odoo-env
+    extra_hosts: *host-access
     volumes: *odoo-volumes
     entrypoint: ["sh", "-c", ". /usr/local/share/stack/scripts/odoo-conf.sh && exec odoo \"$$@\" -c \"$${ODOO_RC}\" -d \"$${ODOO_DB}\"", "--"]
     command: ["shell", "--no-http"]
